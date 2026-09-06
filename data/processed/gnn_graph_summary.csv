@@ -1,0 +1,16 @@
+metric,value
+num_nodes,42372.0
+num_edges,286904.0
+num_node_features,19.0
+num_training_nodes,29660.0
+num_validation_nodes,6355.0
+num_test_nodes,6357.0
+self_loops,0.0
+duplicate_edges,0.0
+average_degree,6.771075238364958
+average_edge_weight,0.8608493208885193
+min_edge_weight,0.004379278048872948
+max_edge_weight,1.0
+train_ratio,0.7
+validation_ratio,0.15
+test_ratio,0.15
