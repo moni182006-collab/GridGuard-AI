@@ -1,0 +1,4 @@
+column,description,type
+CONS_NO,Electricity customer identifier,Identifier
+Date columns,Daily electricity consumption measurements,Numeric
+FLAG,Binary target indicating normal or suspicious behavior,Binary

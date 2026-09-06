@@ -1,0 +1,12 @@
+metric,value
+customers,42372
+total_columns,1042
+consumption_columns,1034
+normal_customers,38757
+suspicious_customers,3615
+missing_values,11233553
+duplicate_rows,0
+duplicate_customer_ids,0
+negative_values,0
+zero_values,5788603
+infinite_values,0
