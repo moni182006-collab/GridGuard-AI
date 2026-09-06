@@ -1,0 +1,10 @@
+metric,value
+nodes,42372.0
+edges,286904.0
+average_degree,6.771075238364958
+average_edge_weight,0.8608492920076608
+minimum_edge_weight,0.00437927802611045
+maximum_edge_weight,1.0
+self_loops,0.0
+duplicate_edges,0.0
+k_neighbors,5.0
