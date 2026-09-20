@@ -1,10 +1,2 @@
-metric,value
-nodes,42372.0
-edges,286904.0
-average_degree,6.771075238364958
-average_edge_weight,0.8608492920076608
-minimum_edge_weight,0.00437927802611045
-maximum_edge_weight,1.0
-self_loops,0.0
-duplicate_edges,0.0
-k_neighbors,5.0
+nodes,edges,average_degree,average_edge_weight,minimum_edge_weight,maximum_edge_weight,self_loops,duplicate_edges,selected_k
+42372,397258,9.37548381006325,0.84667474,0.0041974615,1.0,0,0,7

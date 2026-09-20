@@ -1,0 +1,21 @@
+{
+    "random_seed": 42,
+    "hidden_dim": 64,
+    "embedding_dim": 32,
+    "dropout": 0.3,
+    "learning_rate": 0.005,
+    "weight_decay": 0.0001,
+    "epochs": 100,
+    "patience": 15,
+    "suspicious_class_weight_multiplier": 1.0,
+    "normal_class_weight": 0.5468894243240356,
+    "suspicious_class_weight": 5.831695079803467,
+    "best_epoch": 87,
+    "best_validation_loss": 0.6009658575057983,
+    "test_accuracy": 0.6857008022652195,
+    "test_precision": 0.1673582295988935,
+    "test_recall": 0.654054054054054,
+    "test_f1": 0.2665198237885463,
+    "test_roc_auc": 0.737060069376512,
+    "device": "cpu"
+}

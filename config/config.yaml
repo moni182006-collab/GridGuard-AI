@@ -1,0 +1,62 @@
+project:
+  random_state: 42
+
+data:
+  raw_path: data/raw/sgcc_raw.csv
+  processed_path: data/processed
+  id_column: CONS_NO
+  target_column: FLAG
+
+preprocessing:
+  missing_numeric_strategy: median
+
+feature_engineering:
+  enabled: true
+
+baseline_ml:
+  test_size: 0.20
+
+  logistic_regression:
+    max_iter: 2000
+    class_weight: balanced
+
+  random_forest:
+    n_estimators: 300
+    class_weight: balanced
+    n_jobs: -1
+
+anomaly_detection:
+  n_estimators: 300
+  n_jobs: -1
+  random_state_from_project: true
+  contamination:
+    method: target_prevalence
+
+graph:
+  neighbors:
+    method: adaptive
+    min_k: 3
+    max_k: 10
+    selection: silhouette
+
+gnn:
+  hidden_dim:
+    method: feature_based
+
+  embedding_dim:
+    method: feature_based
+
+  dropout: 0.30
+  learning_rate: 0.005
+  weight_decay: 0.0001
+  max_epochs: 100
+  early_stopping_patience: 15
+
+  split:
+    train_ratio: 0.70
+    validation_ratio: 0.15
+    test_ratio: 0.15
+
+  class_weights:
+    method: inverse_frequency
+    suspicious_multiplier: 1.0

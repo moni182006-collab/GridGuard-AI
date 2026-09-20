@@ -1,67 +1,25 @@
-# ============================================================
-# GRIDGUARD AI
-# PHASE 6 — ISOLATION FOREST ANOMALY DETECTION
-# ============================================================
-
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-
 from pathlib import Path
 
-from sklearn.ensemble import IsolationForest
+import joblib
+import numpy as np
+import pandas as pd
+import yaml
 
+from sklearn.ensemble import IsolationForest
 from sklearn.metrics import (
-    classification_report,
-    confusion_matrix,
+    accuracy_score,
     precision_score,
     recall_score,
     f1_score,
     roc_auc_score,
-    roc_curve,
-    ConfusionMatrixDisplay
-)
-
-import joblib
-
-
-# ============================================================
-# PATHS
-# ============================================================
-
-INPUT_PATH = Path("../data/processed/features.csv")
-
-OUTPUT_PATH = Path(
-    "../data/processed/anomaly_results.csv"
-)
-
-MODEL_PATH = Path(
-    "../models/isolation_forest.pkl"
-)
-
-OUTPUT_DIR = Path(
-    "../data/processed"
+    classification_report,
+    confusion_matrix,
 )
 
 
 # ============================================================
-# SETTINGS
-# ============================================================
-
-ID_COLUMN = "CONS_NO"
-TARGET_COLUMN = "FLAG"
-
-RANDOM_STATE = 42
-
-# Expected approximate suspicious proportion:
-# 3615 / 42372 ≈ 8.5%
-#
-# We use 0.085 as the initial contamination estimate.
-CONTAMINATION = 0.085
-
-
-# ============================================================
-# LOAD DATA
+# GRIDGUARD AI — PHASE 6
+# ISOLATION FOREST ANOMALY DETECTION
 # ============================================================
 
 print("=" * 70)
@@ -69,90 +27,333 @@ print("GRIDGUARD AI — PHASE 6")
 print("ISOLATION FOREST ANOMALY DETECTION")
 print("=" * 70)
 
+
+# ============================================================
+# PROJECT ROOT
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
+
+if not CONFIG_PATH.exists():
+    raise FileNotFoundError(
+        f"Configuration file not found:\n{CONFIG_PATH}"
+    )
+
+with open(
+    CONFIG_PATH,
+    "r",
+    encoding="utf-8"
+) as file:
+    CONFIG = yaml.safe_load(file)
+
+
+# ============================================================
+# DATA CONFIGURATION
+# ============================================================
+
+DATA_CONFIG = CONFIG["data"]
+
+DATA_DIR = (
+    BASE_DIR
+    / DATA_CONFIG["processed_path"]
+)
+
+INPUT_PATH = (
+    DATA_DIR
+    / "features.csv"
+)
+
+MODEL_DIR = (
+    BASE_DIR
+    / "models"
+)
+
+ID_COLUMN = DATA_CONFIG["id_column"]
+
+TARGET_COLUMN = DATA_CONFIG["target_column"]
+
+
+# ============================================================
+# ANOMALY CONFIGURATION
+# ============================================================
+
+ANOMALY_CONFIG = CONFIG[
+    "anomaly_detection"
+]
+
+RANDOM_STATE = CONFIG[
+    "project"
+]["random_state"]
+
+
+# ============================================================
+# VALIDATE INPUT
+# ============================================================
+
+print("\nProject root:")
+print(BASE_DIR)
+
+print("\nFeature dataset:")
+print(INPUT_PATH)
+
+if not INPUT_PATH.exists():
+
+    raise FileNotFoundError(
+        "\nfeatures.csv was not found.\n\n"
+        "Expected location:\n"
+        f"{INPUT_PATH}\n\n"
+        "Run Phase 4 first:\n"
+        "python src\\feature_engineering.py"
+    )
+
+
+# ============================================================
+# LOAD FEATURE DATASET
+# ============================================================
+
 print("\nLoading feature dataset...")
 
-df = pd.read_csv(INPUT_PATH)
+df = pd.read_csv(
+    INPUT_PATH
+)
 
-print("Dataset shape:", df.shape)
+print(
+    f"Rows detected: {len(df):,}"
+)
 
-
-# ============================================================
-# CHECK DATA
-# ============================================================
-
-print("\nMissing values:")
-
-print(df.isnull().sum().sum())
-
-
-print("\nTarget distribution:")
-
-print(df[TARGET_COLUMN].value_counts())
+print(
+    f"Columns detected: {len(df.columns):,}"
+)
 
 
 # ============================================================
-# CREATE FEATURE MATRIX
+# VALIDATE REQUIRED COLUMNS
 # ============================================================
 
-print("\nPreparing anomaly-detection features...")
+required_columns = [
+    ID_COLUMN,
+    TARGET_COLUMN,
+]
 
-# IMPORTANT:
-# FLAG is NOT used for training.
-# CONS_NO is only an identifier.
+missing_columns = [
+    column
+    for column in required_columns
+    if column not in df.columns
+]
 
-X = df.drop(
-    columns=[
+if missing_columns:
+
+    raise ValueError(
+        "Required columns are missing:\n"
+        f"{missing_columns}"
+    )
+
+
+# ============================================================
+# DYNAMIC FEATURE DETECTION
+# ============================================================
+
+feature_columns = [
+    column
+    for column in df.columns
+    if column not in [
         ID_COLUMN,
-        TARGET_COLUMN
+        TARGET_COLUMN,
+    ]
+]
+
+if not feature_columns:
+
+    raise ValueError(
+        "No feature columns were detected."
+    )
+
+
+print(
+    f"Features detected: "
+    f"{len(feature_columns):,}"
+)
+
+
+# ============================================================
+# PREPARE FEATURES
+# ============================================================
+
+X = df[
+    feature_columns
+].copy()
+
+y = df[
+    TARGET_COLUMN
+].copy()
+
+
+# ============================================================
+# ENSURE NUMERIC FEATURES
+# ============================================================
+
+X = X.apply(
+    pd.to_numeric,
+    errors="coerce"
+)
+
+
+# ============================================================
+# HANDLE INVALID VALUES
+# ============================================================
+
+X = X.replace(
+    [np.inf, -np.inf],
+    np.nan
+)
+
+for column in X.columns:
+
+    median_value = X[column].median()
+
+    X[column] = X[column].fillna(
+        median_value
+    )
+
+
+# ============================================================
+# VALIDATE TARGET
+# ============================================================
+
+if y.isna().any():
+
+    raise ValueError(
+        "Target column contains missing values."
+    )
+
+y = pd.to_numeric(
+    y,
+    errors="raise"
+).astype(int)
+
+
+unique_classes = sorted(
+    y.unique()
+)
+
+if len(unique_classes) != 2:
+
+    raise ValueError(
+        "Isolation Forest evaluation "
+        "currently requires a binary target.\n"
+        f"Detected classes: {unique_classes}"
+    )
+
+
+# ============================================================
+# DYNAMIC CONTAMINATION
+# ============================================================
+
+contamination_config = (
+    ANOMALY_CONFIG[
+        "contamination"
     ]
 )
 
-y = df[TARGET_COLUMN]
-
-
-print("\nFeature matrix shape:", X.shape)
-
-print("\nFeatures used by Isolation Forest:")
-
-for column in X.columns:
-    print(" -", column)
-
-
-# ============================================================
-# TRAIN ISOLATION FOREST
-# ============================================================
-
-print("\n" + "=" * 70)
-print("TRAINING ISOLATION FOREST")
-print("=" * 70)
-
-isolation_forest = IsolationForest(
-    n_estimators=300,
-    contamination=CONTAMINATION,
-    random_state=RANDOM_STATE,
-    n_jobs=-1
+contamination_method = (
+    contamination_config[
+        "method"
+    ]
 )
 
 
-isolation_forest.fit(X)
+if contamination_method == (
+    "target_prevalence"
+):
+
+    positive_class = max(
+        unique_classes
+    )
+
+    contamination = (
+        y == positive_class
+    ).mean()
+
+else:
+
+    raise ValueError(
+        "Unsupported contamination method:\n"
+        f"{contamination_method}"
+    )
 
 
-print("\nIsolation Forest training complete.")
+# Isolation Forest requires contamination
+# to be greater than 0 and less than 0.5.
+if not (
+    0 < contamination < 0.5
+):
+
+    raise ValueError(
+        "Derived contamination is invalid:\n"
+        f"{contamination:.6f}\n\n"
+        "Isolation Forest requires a value "
+        "between 0 and 0.5."
+    )
+
+
+print(
+    "\nDataset-derived contamination:"
+)
+
+print(
+    f"{contamination:.6f}"
+)
 
 
 # ============================================================
-# GENERATE PREDICTIONS
+# CREATE ISOLATION FOREST
 # ============================================================
 
-print("\nGenerating anomaly predictions...")
+print(
+    "\nTraining Isolation Forest..."
+)
 
-raw_predictions = isolation_forest.predict(X)
+model = IsolationForest(
 
-# Isolation Forest:
-#  1  = normal
-# -1  = anomaly
+    n_estimators=ANOMALY_CONFIG[
+        "n_estimators"
+    ],
 
-df["anomaly_label"] = np.where(
+    contamination=contamination,
+
+    random_state=RANDOM_STATE,
+
+    n_jobs=ANOMALY_CONFIG[
+        "n_jobs"
+    ],
+)
+
+
+# ============================================================
+# TRAIN
+# ============================================================
+
+model.fit(
+    X
+)
+
+
+# ============================================================
+# ANOMALY PREDICTIONS
+# ============================================================
+
+raw_predictions = model.predict(
+    X
+)
+
+anomaly_label = np.where(
     raw_predictions == -1,
     1,
     0
@@ -160,147 +361,127 @@ df["anomaly_label"] = np.where(
 
 
 # ============================================================
-# GENERATE ANOMALY SCORE
+# ANOMALY SCORE
 # ============================================================
 
-print("Generating anomaly scores...")
-
-raw_scores = isolation_forest.decision_function(X)
-
-# Lower decision_function = more anomalous.
+# Isolation Forest's decision_function:
+# higher = more normal.
 #
-# Convert it so:
-# larger anomaly_score = more unusual
+# Therefore negate it so:
+# higher anomaly_score = more anomalous.
 
-df["anomaly_score"] = -raw_scores
+raw_scores = (
+    -model.decision_function(X)
+)
 
-
-# ============================================================
-# NORMALIZE ANOMALY SCORE
-# ============================================================
-
-score_min = df["anomaly_score"].min()
-
-score_max = df["anomaly_score"].max()
+score_min = raw_scores.min()
+score_max = raw_scores.max()
 
 if score_max > score_min:
 
-    df["anomaly_score_normalized"] = (
-        (df["anomaly_score"] - score_min)
+    anomaly_score = (
+        (raw_scores - score_min)
         /
-        (score_max - score_min)
+        (
+            score_max
+            - score_min
+        )
     )
 
 else:
 
-    df["anomaly_score_normalized"] = 0.0
-
-
-# ============================================================
-# ANOMALY SUMMARY
-# ============================================================
-
-print("\n" + "=" * 70)
-print("ANOMALY SUMMARY")
-print("=" * 70)
-
-total_anomalies = (
-    df["anomaly_label"] == 1
-).sum()
-
-total_normal = (
-    df["anomaly_label"] == 0
-).sum()
-
-print(
-    f"\nNormal according to Isolation Forest: "
-    f"{total_normal}"
-)
-
-print(
-    f"Anomalies according to Isolation Forest: "
-    f"{total_anomalies}"
-)
-
-print(
-    f"Anomaly percentage: "
-    f"{total_anomalies / len(df) * 100:.2f}%"
-)
-
-
-# ============================================================
-# EVALUATION AGAINST FLAG
-# ============================================================
-#
-# IMPORTANT:
-# FLAG is NOT used for training.
-# It is used here ONLY to evaluate how well
-# anomalies overlap with known suspicious labels.
-# ============================================================
-
-print("\n" + "=" * 70)
-print("EVALUATION AGAINST KNOWN LABELS")
-print("=" * 70)
-
-
-anomaly_precision = precision_score(
-    y,
-    df["anomaly_label"],
-    zero_division=0
-)
-
-anomaly_recall = recall_score(
-    y,
-    df["anomaly_label"],
-    zero_division=0
-)
-
-anomaly_f1 = f1_score(
-    y,
-    df["anomaly_label"],
-    zero_division=0
-)
-
-
-try:
-
-    anomaly_auc = roc_auc_score(
-        y,
-        df["anomaly_score_normalized"]
+    anomaly_score = np.zeros(
+        len(raw_scores)
     )
 
-except ValueError:
 
-    anomaly_auc = np.nan
+# ============================================================
+# RESULT DATAFRAME
+# ============================================================
 
+results = df[
+    [
+        ID_COLUMN,
+        TARGET_COLUMN,
+    ]
+].copy()
+
+results[
+    "anomaly_label"
+] = anomaly_label
+
+results[
+    "anomaly_score"
+] = anomaly_score
+
+
+# ============================================================
+# EVALUATION
+# ============================================================
 
 print(
-    f"\nPrecision: {anomaly_precision:.4f}"
+    "\nEvaluating anomaly detection..."
 )
 
-print(
-    f"Recall   : {anomaly_recall:.4f}"
-)
+metrics = {
 
-print(
-    f"F1 Score : {anomaly_f1:.4f}"
-)
+    "accuracy":
+        accuracy_score(
+            y,
+            anomaly_label
+        ),
 
-print(
-    f"ROC-AUC  : {anomaly_auc:.4f}"
-)
+    "precision":
+        precision_score(
+            y,
+            anomaly_label,
+            zero_division=0
+        ),
+
+    "recall":
+        recall_score(
+            y,
+            anomaly_label,
+            zero_division=0
+        ),
+
+    "f1":
+        f1_score(
+            y,
+            anomaly_label,
+            zero_division=0
+        ),
+
+    "roc_auc":
+        roc_auc_score(
+            y,
+            anomaly_score
+        ),
+}
 
 
-print("\nClassification Report:")
+# ============================================================
+# PRINT RESULTS
+# ============================================================
+
+print("\n" + "-" * 70)
+print("ISOLATION FOREST RESULTS")
+print("-" * 70)
+
+for metric_name, metric_value in metrics.items():
+
+    print(
+        f"{metric_name:<12}: "
+        f"{metric_value:.4f}"
+    )
+
+
+print("\nClassification report:")
 
 print(
     classification_report(
         y,
-        df["anomaly_label"],
-        target_names=[
-            "Normal",
-            "Suspicious"
-        ],
+        anomaly_label,
         zero_division=0
     )
 )
@@ -310,223 +491,47 @@ print(
 # CONFUSION MATRIX
 # ============================================================
 
-cm = confusion_matrix(
+confusion = confusion_matrix(
     y,
-    df["anomaly_label"]
+    anomaly_label
 )
-
-print("\nConfusion Matrix:")
-
-print(cm)
-
-
-fig, ax = plt.subplots(
-    figsize=(6, 5)
-)
-
-ConfusionMatrixDisplay(
-    confusion_matrix=cm,
-    display_labels=[
-        "Normal",
-        "Suspicious"
-    ]
-).plot(ax=ax)
-
-plt.title(
-    "Isolation Forest Confusion Matrix"
-)
-
-plt.tight_layout()
-
-plt.savefig(
-    OUTPUT_DIR /
-    "isolation_forest_confusion_matrix.png",
-    dpi=150
-)
-
-plt.show()
-
-
-# ============================================================
-# ANOMALY SCORE DISTRIBUTION
-# ============================================================
-
-print("\nCreating anomaly score distribution...")
-
-plt.figure(figsize=(10, 6))
-
-plt.hist(
-    df.loc[
-        df[TARGET_COLUMN] == 0,
-        "anomaly_score_normalized"
-    ],
-    bins=50,
-    alpha=0.6,
-    label="Normal"
-)
-
-plt.hist(
-    df.loc[
-        df[TARGET_COLUMN] == 1,
-        "anomaly_score_normalized"
-    ],
-    bins=50,
-    alpha=0.6,
-    label="Suspicious"
-)
-
-plt.xlabel(
-    "Normalized Anomaly Score"
-)
-
-plt.ylabel(
-    "Number of Households"
-)
-
-plt.title(
-    "Isolation Forest Anomaly Score Distribution"
-)
-
-plt.legend()
-
-plt.tight_layout()
-
-plt.savefig(
-    OUTPUT_DIR /
-    "anomaly_score_distribution.png",
-    dpi=150
-)
-
-plt.show()
-
-
-# ============================================================
-# TOP ANOMALOUS HOUSEHOLDS
-# ============================================================
-
-print("\n" + "=" * 70)
-print("TOP 20 MOST ANOMALOUS HOUSEHOLDS")
-print("=" * 70)
-
-top_anomalies = df.sort_values(
-    by="anomaly_score_normalized",
-    ascending=False
-).head(20)
-
-display_columns = [
-    ID_COLUMN,
-    TARGET_COLUMN,
-    "anomaly_score",
-    "anomaly_score_normalized",
-    "anomaly_label",
-    "avg_consumption",
-    "std_consumption",
-    "zero_ratio",
-    "missing_ratio",
-    "peak_to_average",
-    "coefficient_variation"
-]
 
 print(
-    top_anomalies[
-        display_columns
-    ].to_string(index=False)
+    "Confusion matrix:"
+)
+
+print(
+    confusion
 )
 
 
 # ============================================================
-# CHECK HOW MANY TOP ANOMALIES ARE SUSPICIOUS
+# CREATE OUTPUT DIRECTORY
 # ============================================================
 
-print("\nChecking top anomaly overlap...")
+DATA_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
-for top_n in [100, 500, 1000]:
-
-    top_n_df = df.sort_values(
-        by="anomaly_score_normalized",
-        ascending=False
-    ).head(top_n)
-
-    suspicious_count = (
-        top_n_df[TARGET_COLUMN] == 1
-    ).sum()
-
-    percentage = (
-        suspicious_count / top_n
-    ) * 100
-
-    print(
-        f"Top {top_n}: "
-        f"{suspicious_count} suspicious "
-        f"({percentage:.2f}%)"
-    )
+MODEL_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
 # ============================================================
 # SAVE ANOMALY RESULTS
 # ============================================================
 
-result_columns = [
-    ID_COLUMN,
-    TARGET_COLUMN,
+results_path = (
+    DATA_DIR
+    / "anomaly_results.csv"
+)
 
-    "anomaly_label",
-    "anomaly_score",
-    "anomaly_score_normalized",
-
-    "avg_consumption",
-    "median_consumption",
-    "std_consumption",
-    "min_consumption",
-    "max_consumption",
-
-    "zero_days",
-    "missing_days",
-    "zero_ratio",
-    "missing_ratio",
-
-    "consumption_range",
-    "peak_to_average",
-    "coefficient_variation",
-    "median_to_average",
-    "min_to_average",
-    "max_to_median",
-    "zero_percentage",
-    "missing_percentage",
-    "stability_score",
-    "consumption_intensity"
-]
-
-
-df[result_columns].to_csv(
-    OUTPUT_PATH,
+results.to_csv(
+    results_path,
     index=False
-)
-
-
-print(
-    f"\nAnomaly results saved to: "
-    f"{OUTPUT_PATH}"
-)
-
-
-# ============================================================
-# SAVE MODEL
-# ============================================================
-
-MODEL_PATH.parent.mkdir(
-    parents=True,
-    exist_ok=True
-)
-
-joblib.dump(
-    isolation_forest,
-    MODEL_PATH
-)
-
-print(
-    f"Isolation Forest model saved to: "
-    f"{MODEL_PATH}"
 )
 
 
@@ -534,64 +539,126 @@ print(
 # SAVE METRICS
 # ============================================================
 
-metrics = pd.DataFrame({
-    "Metric": [
-        "Precision",
-        "Recall",
-        "F1",
-        "ROC_AUC",
-        "Total Anomalies",
-        "Anomaly Percentage"
-    ],
+metrics_path = (
+    DATA_DIR
+    / "isolation_forest_metrics.csv"
+)
 
-    "Value": [
-        anomaly_precision,
-        anomaly_recall,
-        anomaly_f1,
-        anomaly_auc,
-        total_anomalies,
-        total_anomalies / len(df) * 100
-    ]
-})
-
-
-metrics.to_csv(
-    OUTPUT_DIR /
-    "isolation_forest_metrics.csv",
+pd.DataFrame(
+    [metrics]
+).to_csv(
+    metrics_path,
     index=False
 )
 
 
 # ============================================================
-# FINAL
+# SAVE CONFUSION MATRIX
+# ============================================================
+
+confusion_path = (
+    DATA_DIR
+    / "isolation_forest_confusion_matrix.csv"
+)
+
+pd.DataFrame(
+    confusion
+).to_csv(
+    confusion_path,
+    index=False
+)
+
+
+# ============================================================
+# TOP ANOMALIES
+# ============================================================
+
+top_count = min(
+    100,
+    len(results)
+)
+
+top_anomalies = (
+    results
+    .sort_values(
+        "anomaly_score",
+        ascending=False
+    )
+    .head(top_count)
+)
+
+top_anomalies_path = (
+    DATA_DIR
+    / "top_anomalies.csv"
+)
+
+top_anomalies.to_csv(
+    top_anomalies_path,
+    index=False
+)
+
+
+# ============================================================
+# SAVE MODEL
+# ============================================================
+
+model_path = (
+    MODEL_DIR
+    / "isolation_forest.pkl"
+)
+
+joblib.dump(
+    model,
+    model_path
+)
+
+
+# ============================================================
+# FINAL SUMMARY
 # ============================================================
 
 print("\n" + "=" * 70)
-print("PHASE 6 ISOLATION FOREST COMPLETE")
+print("PHASE 6 COMPLETED SUCCESSFULLY")
 print("=" * 70)
 
-print("\nGenerated files:")
-
 print(
-    " - data/processed/anomaly_results.csv"
+    f"Samples: {len(df):,}"
 )
 
 print(
-    " - data/processed/isolation_forest_metrics.csv"
+    f"Features: {len(feature_columns):,}"
 )
 
 print(
-    " - data/processed/isolation_forest_confusion_matrix.png"
+    f"Contamination: "
+    f"{contamination:.6f}"
 )
 
 print(
-    " - data/processed/anomaly_score_distribution.png"
+    f"Anomalies detected: "
+    f"{anomaly_label.sum():,}"
 )
 
 print(
-    " - models/isolation_forest.pkl"
+    "\nGenerated files:"
 )
 
-print("\nREADY FOR PHASE 7 — GRAPH CONSTRUCTION")
+print(
+    results_path
+)
 
-print("=" * 70)
+print(
+    metrics_path
+)
+
+print(
+    confusion_path
+)
+
+print(
+    top_anomalies_path
+)
+
+print(
+    model_path
+)

@@ -1,227 +1,218 @@
-import pandas as pd
-import numpy as np
 from pathlib import Path
+import sys
+
+import pandas as pd
+import yaml
 
 
 # ============================================================
-# GRIDGUARD AI
-# PHASE 3 — DATA PREPROCESSING
+# PROJECT PATHS
 # ============================================================
 
-RAW_PATH = Path("../data/raw/sgcc_raw.csv")
-OUTPUT_PATH = Path("../data/processed/clean_data.csv")
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_PATH = BASE_DIR / "config" / "config.yaml"
+
+with open(CONFIG_PATH, "r", encoding="utf-8") as file:
+    CONFIG = yaml.safe_load(file)
 
 
-ID_COLUMN = "CONS_NO"
-TARGET_COLUMN = "FLAG"
+# ============================================================
+# CONFIGURATION
+# ============================================================
+
+DATA_CONFIG = CONFIG["data"]
+
+RAW_PATH = BASE_DIR / DATA_CONFIG["raw_path"]
+PROCESSED_DIR = BASE_DIR / DATA_CONFIG["processed_path"]
+
+ID_COLUMN = DATA_CONFIG["id_column"]
+TARGET_COLUMN = DATA_CONFIG["target_column"]
+
+OUTPUT_PATH = PROCESSED_DIR / "clean_data.csv"
 
 
-def load_data():
-    """Load the raw SGCC dataset."""
+# ============================================================
+# LOAD DATA
+# ============================================================
 
-    print("Loading dataset...")
+print("=" * 70)
+print("GRIDGUARD AI — PREPROCESSING")
+print("=" * 70)
 
-    df = pd.read_csv(RAW_PATH)
+print("\nLoading dataset...")
 
-    print(f"Dataset shape: {df.shape}")
+df = pd.read_csv(RAW_PATH)
 
-    return df
+print(f"Rows detected: {len(df):,}")
+print(f"Columns detected: {len(df.columns):,}")
 
 
-def identify_consumption_columns(df):
-    """Identify daily consumption columns."""
+# ============================================================
+# VALIDATE REQUIRED COLUMNS
+# ============================================================
 
-    consumption_columns = [
-        col for col in df.columns
-        if col not in [ID_COLUMN, TARGET_COLUMN]
-    ]
+required_columns = [ID_COLUMN, TARGET_COLUMN]
 
-    print(
-        f"Consumption columns found: "
-        f"{len(consumption_columns)}"
+missing_required = [
+    column
+    for column in required_columns
+    if column not in df.columns
+]
+
+if missing_required:
+    raise ValueError(
+        f"Required columns missing: {missing_required}"
     )
 
-    return consumption_columns
+
+# ============================================================
+# DETECT CONSUMPTION COLUMNS DYNAMICALLY
+# ============================================================
+
+consumption_columns = [
+    column
+    for column in df.columns
+    if column not in required_columns
+]
+
+if not consumption_columns:
+    raise ValueError(
+        "No consumption columns were detected."
+    )
+
+print(
+    f"Consumption columns detected: "
+    f"{len(consumption_columns):,}"
+)
 
 
-def convert_consumption_to_numeric(
-    df,
+# ============================================================
+# CONVERT CONSUMPTION DATA TO NUMERIC
+# ============================================================
+
+consumption_data = df[consumption_columns].apply(
+    pd.to_numeric,
+    errors="coerce"
+)
+
+
+# ============================================================
+# ENGINEER BASIC HOUSEHOLD STATISTICS
+# ============================================================
+
+df["avg_consumption"] = consumption_data.mean(axis=1)
+
+df["median_consumption"] = consumption_data.median(axis=1)
+
+df["std_consumption"] = consumption_data.std(
+    axis=1
+)
+
+df["min_consumption"] = consumption_data.min(
+    axis=1
+)
+
+df["max_consumption"] = consumption_data.max(
+    axis=1
+)
+
+df["zero_days"] = (
+    consumption_data.eq(0)
+    .sum(axis=1)
+)
+
+df["missing_days"] = (
+    consumption_data.isna()
+    .sum(axis=1)
+)
+
+total_consumption_columns = len(
     consumption_columns
-):
-    """Convert consumption values to numeric."""
+)
 
-    print("Converting consumption values...")
+df["zero_ratio"] = (
+    df["zero_days"] /
+    total_consumption_columns
+)
 
-    df[consumption_columns] = df[
-        consumption_columns
-    ].apply(
-        pd.to_numeric,
-        errors="coerce"
-    )
-
-    return df
+df["missing_ratio"] = (
+    df["missing_days"] /
+    total_consumption_columns
+)
 
 
-def create_features(
-    df,
-    consumption_columns
-):
-    """Create household-level statistical features."""
+# ============================================================
+# CLEAN ENGINEERED FEATURES
+# ============================================================
 
-    print("Creating features...")
+engineered_columns = [
+    "avg_consumption",
+    "median_consumption",
+    "std_consumption",
+    "min_consumption",
+    "max_consumption",
+    "zero_days",
+    "missing_days",
+    "zero_ratio",
+    "missing_ratio",
+]
 
-    consumption = df[consumption_columns]
+for column in engineered_columns:
 
-    df["avg_consumption"] = consumption.mean(axis=1)
+    median_value = df[column].median()
 
-    df["median_consumption"] = consumption.median(axis=1)
-
-    df["std_consumption"] = consumption.std(axis=1)
-
-    df["min_consumption"] = consumption.min(axis=1)
-
-    df["max_consumption"] = consumption.max(axis=1)
-
-    df["zero_days"] = (
-        consumption == 0
-    ).sum(axis=1)
-
-    df["missing_days"] = (
-        consumption.isna()
-    ).sum(axis=1)
-
-    df["zero_ratio"] = (
-        df["zero_days"] /
-        len(consumption_columns)
-    )
-
-    df["missing_ratio"] = (
-        df["missing_days"] /
-        len(consumption_columns)
-    )
-
-    return df
-
-
-def handle_missing_values(df):
-    """
-    Handle missing values in engineered features.
-
-    We do NOT replace genuine zero consumption.
-    """
-
-    print("Handling missing feature values...")
-
-    feature_columns = [
-        "avg_consumption",
-        "median_consumption",
-        "std_consumption",
-        "min_consumption",
-        "max_consumption",
-    ]
-
-    for column in feature_columns:
-
-        df[column] = df[column].fillna(
-            df[column].median()
-        )
-
-    return df
-
-
-def select_final_features(df):
-    """Select compact ML-ready features."""
-
-    feature_columns = [
-        ID_COLUMN,
-        TARGET_COLUMN,
-
-        "avg_consumption",
-        "median_consumption",
-        "std_consumption",
-        "min_consumption",
-        "max_consumption",
-
-        "zero_days",
-        "missing_days",
-        "zero_ratio",
-        "missing_ratio",
-    ]
-
-    return df[feature_columns].copy()
-
-
-def save_data(df):
-
-    OUTPUT_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True
-    )
-
-    df.to_csv(
-        OUTPUT_PATH,
-        index=False
-    )
-
-    print(
-        f"Processed dataset saved to: "
-        f"{OUTPUT_PATH}"
+    df[column] = df[column].fillna(
+        median_value
     )
 
 
-def main():
+# ============================================================
+# FINAL DATASET
+# ============================================================
 
-    print("=" * 60)
-    print("GRIDGUARD AI — PHASE 3")
-    print("DATA PREPROCESSING")
-    print("=" * 60)
+final_columns = [
+    ID_COLUMN,
+    TARGET_COLUMN,
+    *engineered_columns,
+]
 
-    # Load
-    df = load_data()
-
-    # Identify consumption columns
-    consumption_columns = (
-        identify_consumption_columns(df)
-    )
-
-    # Convert values
-    df = convert_consumption_to_numeric(
-        df,
-        consumption_columns
-    )
-
-    # Create features
-    df = create_features(
-        df,
-        consumption_columns
-    )
-
-    # Handle missing feature values
-    df = handle_missing_values(df)
-
-    # Select final features
-    clean_df = select_final_features(df)
-
-    # Save
-    save_data(clean_df)
-
-    # Final information
-    print("\nFinal dataset shape:")
-    print(clean_df.shape)
-
-    print("\nFinal columns:")
-    print(clean_df.columns.tolist())
-
-    print("\nTarget distribution:")
-    print(clean_df[TARGET_COLUMN].value_counts())
-
-    print("\nMissing values:")
-    print(clean_df.isnull().sum())
-
-    print("\n" + "=" * 60)
-    print("PHASE 3 PREPROCESSING COMPLETE")
-    print("=" * 60)
+clean_df = df[final_columns].copy()
 
 
-if __name__ == "__main__":
-    main()
+# ============================================================
+# SAVE
+# ============================================================
+
+PROCESSED_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
+
+clean_df.to_csv(
+    OUTPUT_PATH,
+    index=False
+)
+
+
+# ============================================================
+# SUMMARY
+# ============================================================
+
+print("\nPreprocessing completed.")
+
+print(
+    f"Final rows: {len(clean_df):,}"
+)
+
+print(
+    f"Final columns: {len(clean_df.columns):,}"
+)
+
+print(
+    f"Missing values: "
+    f"{clean_df.isna().sum().sum():,}"
+)
+
+print(
+    f"\nSaved:\n{OUTPUT_PATH}"
+)
